@@ -125,7 +125,7 @@ same as `SENTINEL_SITE_UUID`.
 1. `SENTINEL_UPGRADE_SCAN` is not set: it does nothing and exits 0.
 2. Drush does not run, or cannot find the site: it fails, because the job is
    set up wrong. Drupal has no working database: it tells Sentinel
-   `no_database` and exits 0.
+   `no_database` and exits 0 (or fails if Sentinel could not be told).
 3. The connector is missing, disabled or older than 1.6.0: it tells Sentinel
    `connector_outdated` and fails.
 4. Upgrade Status is missing: it adds it with Composer for this run, then

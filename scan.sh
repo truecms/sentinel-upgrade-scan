@@ -133,16 +133,14 @@ trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 root="$("${drush[@]}" status --field=root 2> /dev/null | trim)" || root=''
 [[ -n "$root" && -d "$root" ]] || fail "Drush cannot find the Drupal site from here. Set working-directory (SENTINEL_PROJECT_DIR) to your site's project folder in the image."
 
-# Composer work happens in the project root, found from Drupal when the
-# current folder is not it.
-if [[ ! -f composer.json ]]; then
-  dir="$root"
-  while [[ "$dir" != / && ! -f "$dir/composer.json" ]]; do
-    dir="$(dirname "$dir")"
-  done
-  if [[ -f "$dir/composer.json" ]]; then
-    cd "$dir" || fail "Cannot open $dir."
-  fi
+# Composer work happens in the site's own project root, found from Drupal's
+# root, never in a checkout that only looks like one.
+dir="$root"
+while [[ "$dir" != / && ! -f "$dir/composer.json" ]]; do
+  dir="$(dirname "$dir")"
+done
+if [[ -f "$dir/composer.json" ]]; then
+  cd "$dir" || fail "Cannot open $dir."
 fi
 
 # 1. A working Drupal with its database.
@@ -155,7 +153,8 @@ if [[ "$bootstrap" != 'Successful' ]]; then
     exit 1
   fi
   log 'Drupal has no working database here, so there is nothing to scan.'
-  report_problem no_database || true
+  # Passes only when Sentinel heard about it (or the route is closed).
+  report_problem no_database || exit 1
   exit 0
 fi
 
@@ -244,13 +243,15 @@ if [[ "$present" != 'yes' ]]; then
     # install exactly what the lock file holds.
     composer install --no-interaction --no-progress > "$work/composer.log" 2>&1
   else
-    composer require --dev --no-interaction --no-progress drupal/upgrade_status > "$work/composer.log" 2>&1 || {
+    # Change the lock file only, check it, and only then install from it, so
+    # a refused change never touches the installed packages.
+    composer require --dev --no-install --no-interaction --no-progress drupal/upgrade_status > "$work/composer.log" 2>&1 || {
       core="$("${drush[@]}" status --field=drupal-version 2> /dev/null | trim)"
-      [[ -n "$core" ]] && composer require --dev --no-interaction --no-progress drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1
-    }
+      [[ -n "$core" ]] && composer require --dev --no-install --no-interaction --no-progress drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1
+    } && locked_versions_kept && composer install --no-interaction --no-progress >> "$work/composer.log" 2>&1
   fi
   # shellcheck disable=SC2181 # The status of whichever branch ran.
-  if [[ $? -ne 0 ]] || ! locked_versions_kept; then
+  if [[ $? -ne 0 ]]; then
     tail -n 20 "$work/composer.log" >&2
     log "Composer could not add Upgrade Status without changing the site's locked versions."
     report_problem install_failed || true

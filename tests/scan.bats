@@ -65,6 +65,20 @@ scan() { run bash "$ROOT/scan.sh"; }
   ! grep -q 'analyze' "$STUB_LOG"
 }
 
+@test 'no database fails when Sentinel did not hear about it' {
+  STUB_BOOTSTRAP='' STUB_HTTP=500 scan
+  [ "$status" -eq 1 ]
+}
+
+@test 'uses the site Composer root even from a checkout with its own composer.json' {
+  mkdir -p "$BATS_TEST_TMPDIR/checkout"
+  echo '{"checkout": true}' > "$BATS_TEST_TMPDIR/checkout/composer.json"
+  SENTINEL_PROJECT_DIR="$BATS_TEST_TMPDIR/checkout" STUB_ROOT="$PROJECT/web" STUB_US_MISSING=1 scan
+  [ "$status" -eq 0 ]
+  grep -q '"checkout": true' "$BATS_TEST_TMPDIR/checkout/composer.json"
+  grep -q '"original": true' "$PROJECT/composer.json"
+}
+
 @test 'no database and a closed route still passes' {
   STUB_BOOTSTRAP='' STUB_HTTP=404 scan
   [ "$status" -eq 0 ]
@@ -104,7 +118,8 @@ scan() { run bash "$ROOT/scan.sh"; }
 @test 'Upgrade Status missing: adds it, then restores composer files' {
   STUB_US_MISSING=1 scan
   [ "$status" -eq 0 ]
-  grep -q 'composer require --dev --no-interaction --no-progress drupal/upgrade_status$' "$STUB_LOG"
+  grep -q 'composer require --dev --no-install --no-interaction --no-progress drupal/upgrade_status$' "$STUB_LOG"
+  grep -q '^composer install --no-interaction --no-progress$' "$STUB_LOG"
   grep -q '"original": true' "$PROJECT/composer.json"
   grep -q '"original": true' "$PROJECT/composer.lock"
 }
@@ -280,6 +295,7 @@ scan() { run bash "$ROOT/scan.sh"; }
   grep -q '"reason":"install_failed"' "$STUB_LOG"
   [[ "$output" == *'would change drupal/core'* ]]
   grep -q '11.2.5' "$PROJECT/composer.lock"
+  ! grep -q '^composer install' "$STUB_LOG"
 }
 
 @test 'accepts an install that only adds packages' {

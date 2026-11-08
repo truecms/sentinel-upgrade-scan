@@ -310,6 +310,34 @@ scan() { run bash "$ROOT/scan.sh"; }
   [ "$status" -eq 0 ]
 }
 
+@test 'a failed connector URL lookup stops before anything is sent' {
+  STUB_RESOLVE_FAIL=1 scan
+  [ "$status" -eq 1 ]
+  ! grep -q '^curl' "$STUB_LOG"
+}
+
+@test 'refuses an install that removes a locked package' {
+  echo '{"packages":[{"name":"drupal/core","version":"11.2.5"},{"name":"drupal/token","version":"1.15.0"}]}' > "$PROJECT/composer.lock"
+  echo '{"packages":[{"name":"drupal/core","version":"11.2.5"}],"packages-dev":[{"name":"drupal/upgrade_status","version":"4.3.10"}]}' > "$BATS_TEST_TMPDIR/after.lock"
+  STUB_US_MISSING=1 STUB_LOCK_AFTER="$BATS_TEST_TMPDIR/after.lock" scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'would change drupal/token'* ]]
+}
+
+@test 'installs development packages even when the image turns them off' {
+  COMPOSER_NO_DEV=1 STUB_US_MISSING=1 scan
+  [ "$status" -eq 0 ]
+  ! grep -q 'composer no-dev=1' "$STUB_LOG"
+  grep -q 'composer no-dev=0' "$STUB_LOG"
+}
+
+@test 'removes a lock file made only for the scan' {
+  rm "$PROJECT/composer.lock"
+  STUB_US_MISSING=1 scan
+  [ "$status" -eq 0 ]
+  [ ! -f "$PROJECT/composer.lock" ]
+}
+
 @test 'gitlab/scan.yml pins the SHA-256 of scan.sh' {
   if command -v sha256sum > /dev/null; then
     sum="$(sha256sum "$ROOT/scan.sh" | cut -d' ' -f1)"

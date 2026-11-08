@@ -13,7 +13,7 @@ case "$1" in
     esac ;;
   php:eval)
     if [[ "$2" == *CONNECTOR_VERSION* ]]; then echo "${STUB_CONNECTOR-1.6.0}";
-    elif [[ "$2" == *ApiBaseUrlResolver* ]]; then echo "${STUB_CONNECTOR_URL-${SENTINEL_CONNECTOR_API_BASE_URL-}}";
+    elif [[ "$2" == *ApiBaseUrlResolver* ]]; then [[ -n "${STUB_RESOLVE_FAIL:-}" ]] && exit 1; echo "${STUB_CONNECTOR_URL-${SENTINEL_CONNECTOR_API_BASE_URL-}}";
     elif [[ -n "${STUB_US_MISSING:-}" ]]; then echo no; else echo yes; fi ;;
   pm:list)
     printf 'node\nsentinel_connector\n'

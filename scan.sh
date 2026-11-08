@@ -94,6 +94,9 @@ restore() {
     cp "$work/composer.json" composer.json
     if [[ -f "$work/composer.lock" ]]; then
       cp "$work/composer.lock" composer.lock
+    else
+      # The site had no lock file: drop the one made for the scan.
+      rm -f composer.lock
     fi
     log 'Restored composer.json and composer.lock. Nothing is committed.'
   fi
@@ -178,7 +181,7 @@ resolved="$(env ${url_env[@]+"${url_env[@]}"} "${drush[@]}" php:eval '
       // Connector 1.3 and older kept the URL in configuration.
       echo strtolower(rtrim((string) \Drupal::config("sentinel_connector.settings")->get("api_base_url"), "/"));
     }
-  }' 2> /dev/null | trim)" || resolved=''
+  }' 2> /dev/null | trim)" || fail 'Could not ask the connector which Sentinel it sends to. Nothing was sent.'
 resolved="${resolved%/}"
 if [[ "$resolved" == INVALID ]] || { [[ -n "$resolved" ]] && ! valid_url "$resolved"; }; then
   fail "The connector's Sentinel API URL is not valid. Fix it in settings.php or set api-url (SENTINEL_API_URL). Nothing was sent."
@@ -218,7 +221,7 @@ locked_versions_kept() {
     $before = $versions($argv[1]);
     $after = $versions($argv[2]);
     foreach ($before as $name => $version) {
-      if (isset($after[$name]) && $after[$name] !== $version) {
+      if (($after[$name] ?? NULL) !== $version) {
         fwrite(STDERR, "Adding Upgrade Status would change $name.\n");
         exit(1);
       }
@@ -241,14 +244,14 @@ if [[ "$present" != 'yes' ]]; then
   if composer show --locked drupal/upgrade_status > /dev/null 2>&1; then
     # Already in the lock file, as a dev package left out of the image:
     # install exactly what the lock file holds.
-    composer install --no-interaction --no-progress > "$work/composer.log" 2>&1
+    COMPOSER_NO_DEV=0 composer install --no-interaction --no-progress > "$work/composer.log" 2>&1
   else
     # Change the lock file only, check it, and only then install from it, so
     # a refused change never touches the installed packages.
-    composer require --dev --no-install --no-interaction --no-progress drupal/upgrade_status > "$work/composer.log" 2>&1 || {
+    COMPOSER_NO_DEV=0 composer require --dev --no-install --no-interaction --no-progress drupal/upgrade_status > "$work/composer.log" 2>&1 || {
       core="$("${drush[@]}" status --field=drupal-version 2> /dev/null | trim)"
-      [[ -n "$core" ]] && composer require --dev --no-install --no-interaction --no-progress drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1
-    } && locked_versions_kept && composer install --no-interaction --no-progress >> "$work/composer.log" 2>&1
+      [[ -n "$core" ]] && COMPOSER_NO_DEV=0 composer require --dev --no-install --no-interaction --no-progress drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1
+    } && locked_versions_kept && COMPOSER_NO_DEV=0 composer install --no-interaction --no-progress >> "$work/composer.log" 2>&1
   fi
   # shellcheck disable=SC2181 # The status of whichever branch ran.
   if [[ $? -ne 0 ]]; then

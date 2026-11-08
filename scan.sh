@@ -47,8 +47,11 @@ valid_url() {
   [[ "$1" =~ ^https://[^/[:space:]]+$ || "$1" =~ ^http://(localhost|[^/:[:space:]]+\.localhost)(:[0-9]+)?$ ]]
 }
 api_given="${SENTINEL_API_URL:-${SENTINEL_CONNECTOR_API_BASE_URL:-}}"
+# Lower case, as the connector stores it, so the two can be compared.
+api_given="$(printf '%s' "$api_given" | tr '[:upper:]' '[:lower:]')"
 api="${api_given:-$DEFAULT_API_URL}"
 api="${api%/}"
+api_given="${api_given%/}"
 valid_url "$api" || fail 'SENTINEL_API_URL must be a base URL with no path, such as https://ingest.sentinelconnector.io. Plain http:// is allowed only for localhost.'
 
 cd "${SENTINEL_PROJECT_DIR:-.}" || fail 'SENTINEL_PROJECT_DIR does not exist.'
@@ -145,6 +148,12 @@ fi
 # 1. A working Drupal with its database.
 bootstrap="$("${drush[@]}" status --field=bootstrap 2> /dev/null | trim)" || bootstrap=''
 if [[ "$bootstrap" != 'Successful' ]]; then
+  db="$("${drush[@]}" status --field=db-status 2> /dev/null | trim)" || db=''
+  if [[ "$db" == 'Connected' ]]; then
+    log 'Drupal reaches its database but does not start. Check the site image.'
+    report_problem scan_failed || true
+    exit 1
+  fi
   log 'Drupal has no working database here, so there is nothing to scan.'
   report_problem no_database || true
   exit 0
@@ -161,9 +170,15 @@ fi
 # shellcheck disable=SC2016 # PHP code, expanded by PHP.
 resolved="$(env ${url_env[@]+"${url_env[@]}"} "${drush[@]}" php:eval '
   $class = "Drupal\\sentinel_connector\\ApiBaseUrlResolver";
-  if (\Drupal::moduleHandler()->moduleExists("sentinel_connector") && class_exists($class)) {
-    $url = \Drupal::service($class)->getUrl();
-    echo $url ?? "INVALID";
+  if (\Drupal::moduleHandler()->moduleExists("sentinel_connector")) {
+    if (class_exists($class)) {
+      $url = \Drupal::service($class)->getUrl();
+      echo $url ?? "INVALID";
+    }
+    else {
+      // Connector 1.3 and older kept the URL in configuration.
+      echo strtolower(rtrim((string) \Drupal::config("sentinel_connector.settings")->get("api_base_url"), "/"));
+    }
   }' 2> /dev/null | trim)" || resolved=''
 resolved="${resolved%/}"
 if [[ "$resolved" == INVALID ]] || { [[ -n "$resolved" ]] && ! valid_url "$resolved"; }; then
@@ -187,6 +202,29 @@ if [[ -z "$connector" ]] || ! php -r 'exit(version_compare($argv[1], $argv[2], "
   report_problem connector_outdated || true
   exit 1
 fi
+
+# Every package the site's lock file held is still at the same version.
+locked_versions_kept() {
+  [[ -f "$work/composer.lock" ]] || return 0
+  # shellcheck disable=SC2016 # PHP code, expanded by PHP.
+  php -r '
+    $versions = function (string $file): array {
+      $lock = json_decode((string) file_get_contents($file), TRUE) ?: [];
+      $out = [];
+      foreach (array_merge($lock["packages"] ?? [], $lock["packages-dev"] ?? []) as $package) {
+        $out[$package["name"]] = ($package["version"] ?? "") . "@" . ($package["source"]["reference"] ?? $package["dist"]["reference"] ?? "");
+      }
+      return $out;
+    };
+    $before = $versions($argv[1]);
+    $after = $versions($argv[2]);
+    foreach ($before as $name => $version) {
+      if (isset($after[$name]) && $after[$name] !== $version) {
+        fwrite(STDERR, "Adding Upgrade Status would change $name.\n");
+        exit(1);
+      }
+    }' "$work/composer.lock" composer.lock
+}
 
 # 3. Upgrade Status, added for this run only, never changing locked versions.
 present="$("${drush[@]}" php:eval 'echo \Drupal::service("extension.list.module")->exists("upgrade_status") ? "yes" : "no";' 2> /dev/null | trim)" || present=''
@@ -212,7 +250,7 @@ if [[ "$present" != 'yes' ]]; then
     }
   fi
   # shellcheck disable=SC2181 # The status of whichever branch ran.
-  if [[ $? -ne 0 ]]; then
+  if [[ $? -ne 0 ]] || ! locked_versions_kept; then
     tail -n 20 "$work/composer.log" >&2
     log "Composer could not add Upgrade Status without changing the site's locked versions."
     report_problem install_failed || true

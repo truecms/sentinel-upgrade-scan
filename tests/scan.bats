@@ -266,6 +266,34 @@ scan() { run bash "$ROOT/scan.sh"; }
   ! grep -q '^composer require' "$STUB_LOG"
 }
 
+@test 'a database that connects but a site that does not start fails' {
+  STUB_BOOTSTRAP='' STUB_DB='Connected' scan
+  [ "$status" -eq 1 ]
+  grep -q '"reason":"scan_failed"' "$STUB_LOG"
+}
+
+@test 'refuses an install that changes a locked package' {
+  echo '{"packages":[{"name":"drupal/core","version":"11.2.5"}]}' > "$PROJECT/composer.lock"
+  echo '{"packages":[{"name":"drupal/core","version":"11.2.6"}],"packages-dev":[{"name":"drupal/upgrade_status","version":"4.3.10"}]}' > "$BATS_TEST_TMPDIR/after.lock"
+  STUB_US_MISSING=1 STUB_LOCK_AFTER="$BATS_TEST_TMPDIR/after.lock" scan
+  [ "$status" -eq 1 ]
+  grep -q '"reason":"install_failed"' "$STUB_LOG"
+  [[ "$output" == *'would change drupal/core'* ]]
+  grep -q '11.2.5' "$PROJECT/composer.lock"
+}
+
+@test 'accepts an install that only adds packages' {
+  echo '{"packages":[{"name":"drupal/core","version":"11.2.5"}]}' > "$PROJECT/composer.lock"
+  echo '{"packages":[{"name":"drupal/core","version":"11.2.5"}],"packages-dev":[{"name":"drupal/upgrade_status","version":"4.3.10"}]}' > "$BATS_TEST_TMPDIR/after.lock"
+  STUB_US_MISSING=1 STUB_LOCK_AFTER="$BATS_TEST_TMPDIR/after.lock" scan
+  [ "$status" -eq 0 ]
+}
+
+@test 'a given URL in upper case matches the connector URL' {
+  SENTINEL_API_URL='https://Sentinel.Example/' STUB_CONNECTOR_URL='https://sentinel.example' scan
+  [ "$status" -eq 0 ]
+}
+
 @test 'gitlab/scan.yml pins the SHA-256 of scan.sh' {
   if command -v sha256sum > /dev/null; then
     sum="$(sha256sum "$ROOT/scan.sh" | cut -d' ' -f1)"

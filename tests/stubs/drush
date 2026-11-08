@@ -8,6 +8,7 @@ case "$1" in
     case "$*" in
       *drupal-version*) echo "${STUB_CORE:-11.2.5}" ;;
       *root*) echo "${STUB_ROOT-$PWD/web}" ;;
+      *db-status*) echo "${STUB_DB-}" ;;
       *) echo "${STUB_BOOTSTRAP-Successful}" ;;
     esac ;;
   php:eval)

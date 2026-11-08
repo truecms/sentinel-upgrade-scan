@@ -9,7 +9,7 @@
 sentinel-upgrade-scan:
   variables:
     SENTINEL_UPGRADE_SCAN_REF: v1.0.0
-    SENTINEL_UPGRADE_SCAN_SHA256: 5a0dccdf175b86a94f67c41d75ba4664b9fa48476ebb2b4d81dc9313f0037832
+    SENTINEL_UPGRADE_SCAN_SHA256: 02e855066ce2a1b23546f2c7403b9bf3e7e935f2ac6068f8f7031fdceecc4770
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"

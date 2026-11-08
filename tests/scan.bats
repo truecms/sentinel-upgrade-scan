@@ -104,7 +104,7 @@ scan() { run bash "$ROOT/scan.sh"; }
 @test 'Upgrade Status missing: adds it, then restores composer files' {
   STUB_US_MISSING=1 scan
   [ "$status" -eq 0 ]
-  grep -q 'composer require --dev --no-interaction --no-progress -W drupal/upgrade_status$' "$STUB_LOG"
+  grep -q 'composer require --dev --no-interaction --no-progress drupal/upgrade_status$' "$STUB_LOG"
   grep -q '"original": true' "$PROJECT/composer.json"
   grep -q '"original": true' "$PROJECT/composer.lock"
 }
@@ -167,6 +167,63 @@ scan() { run bash "$ROOT/scan.sh"; }
   unset SENTINEL_API_URL
   STUB_BOOTSTRAP='' scan
   grep -q "curl url https://ingest.sentinelconnector.io/api/v1/sites/$UUID/upgrade-readiness/scan" "$STUB_LOG"
+}
+
+@test 'Drush that does not run fails without reporting' {
+  STUB_DRUSH_BROKEN=1 scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Drush does not run here'* ]]
+  ! grep -q '^curl' "$STUB_LOG"
+}
+
+@test 'refuses a remote http:// API URL' {
+  SENTINEL_API_URL='http://sentinel.example' scan
+  [ "$status" -eq 1 ]
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test 'allows http:// for localhost' {
+  SENTINEL_API_URL='http://localhost:8000' STUB_BOOTSTRAP='' scan
+  [ "$status" -eq 0 ]
+  grep -q 'curl url http://localhost:8000/api/v1/' "$STUB_LOG"
+}
+
+@test 'problem reports follow the connector URL when none is given' {
+  unset SENTINEL_API_URL
+  STUB_CONNECTOR_URL='https://uat-ingest.example' STUB_ANALYZE_RC=1 scan
+  [ "$status" -eq 1 ]
+  grep -q 'curl url https://uat-ingest.example/api/v1/' "$STUB_LOG"
+}
+
+@test 'a given URL wins over the connector URL' {
+  STUB_CONNECTOR_URL='https://uat-ingest.example' STUB_ANALYZE_RC=1 scan
+  grep -q 'curl url https://sentinel.example/api/v1/' "$STUB_LOG"
+}
+
+@test 'uninstalls the modules this run enabled' {
+  scan
+  [ "$status" -eq 0 ]
+  grep -q 'drush pm:uninstall upgrade_status --yes' "$STUB_LOG"
+}
+
+@test 'leaves modules that were already enabled' {
+  STUB_US_ENABLED=1 scan
+  [ "$status" -eq 0 ]
+  ! grep -q 'pm:uninstall' "$STUB_LOG"
+}
+
+@test 'uninstalls the added modules after a failed scan too' {
+  STUB_ANALYZE_RC=1 scan
+  [ "$status" -eq 1 ]
+  grep -q 'drush pm:uninstall upgrade_status --yes' "$STUB_LOG"
+}
+
+@test 'finds the Composer root from Drupal when run elsewhere' {
+  mkdir -p "$PROJECT/web" "$BATS_TEST_TMPDIR/elsewhere"
+  SENTINEL_PROJECT_DIR="$BATS_TEST_TMPDIR/elsewhere" STUB_ROOT="$PROJECT/web" STUB_US_MISSING=1 scan
+  [ "$status" -eq 0 ]
+  grep -q '"original": true' "$PROJECT/composer.json"
+  [ ! -f "$BATS_TEST_TMPDIR/elsewhere/composer.json" ]
 }
 
 @test 'gitlab/scan.yml pins the SHA-256 of scan.sh' {

@@ -41,9 +41,15 @@ uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 [[ "$uuid" =~ $uuid_re ]] || fail 'SENTINEL_SITE_UUID is missing or is not a UUID. Copy it from the site page in Sentinel.'
 [[ "$key" =~ ^sk_scan_[0-9a-f]{64}$ ]] || fail 'SENTINEL_SCAN_KEY is missing or is not a scan key. Create one on the site page in Sentinel and store it as a secret.'
 
-api="${SENTINEL_API_URL:-${SENTINEL_CONNECTOR_API_BASE_URL:-$DEFAULT_API_URL}}"
+# Plain http:// only for localhost, as in the connector: the key must not
+# cross a network in the clear.
+valid_url() {
+  [[ "$1" =~ ^https://[^/[:space:]]+$ || "$1" =~ ^http://(localhost|[^/:[:space:]]+\.localhost)(:[0-9]+)?$ ]]
+}
+api_given="${SENTINEL_API_URL:-${SENTINEL_CONNECTOR_API_BASE_URL:-}}"
+api="${api_given:-$DEFAULT_API_URL}"
 api="${api%/}"
-[[ "$api" =~ ^https?://[^/[:space:]]+$ ]] || fail 'SENTINEL_API_URL must be a base URL such as https://ingest.sentinelconnector.io, with no path.'
+valid_url "$api" || fail 'SENTINEL_API_URL must be a base URL with no path, such as https://ingest.sentinelconnector.io. Plain http:// is allowed only for localhost.'
 
 cd "${SENTINEL_PROJECT_DIR:-.}" || fail 'SENTINEL_PROJECT_DIR does not exist.'
 
@@ -54,6 +60,11 @@ elif [[ -x vendor/bin/drush ]]; then
 else
   drush=(drush)
 fi
+# An absolute path, so Drush still runs after moving to the Composer root.
+if [[ "${drush[0]}" == */* && -e "${drush[0]}" ]]; then
+  drush[0]="$(cd "$(dirname "${drush[0]}")" && pwd)/$(basename "${drush[0]}")"
+fi
+"${drush[@]}" version > /dev/null 2>&1 || fail "Drush does not run here (${drush[0]}). Set working-directory (SENTINEL_PROJECT_DIR) to your site's project folder in the image, or set drush (SENTINEL_DRUSH)."
 
 started="$(date +%s)"
 started_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -65,6 +76,17 @@ printf 'X-Scan-Key: %s\n' "$key" > "$work/header"
 chmod 600 "$work/header"
 
 restore() {
+  if [[ -f "$work/modules_before" && ! -f "$work/added_modules" ]]; then
+    enabled_modules | comm -13 "$work/modules_before" - > "$work/added_modules"
+  fi
+  if [[ -s "$work/added_modules" ]]; then
+    # shellcheck disable=SC2046 # One module name per line.
+    if "${drush[@]}" pm:uninstall $(cat "$work/added_modules") --yes > /dev/null 2>&1; then
+      log 'Uninstalled the modules added for the scan.'
+    else
+      log 'Could not uninstall the modules added for the scan. Do not reuse this database copy.'
+    fi
+  fi
   if [[ -f "$work/composer.json" ]]; then
     cp "$work/composer.json" composer.json
     if [[ -f "$work/composer.lock" ]]; then
@@ -109,6 +131,18 @@ if [[ "$bootstrap" != 'Successful' ]]; then
   exit 0
 fi
 
+# Composer work happens in the project root, found from Drupal when the
+# current folder is not it.
+if [[ ! -f composer.json ]]; then
+  dir="$("${drush[@]}" status --field=root 2> /dev/null | tr -d '[:space:]')"
+  while [[ -n "$dir" && "$dir" != / && ! -f "$dir/composer.json" ]]; do
+    dir="$(dirname "$dir")"
+  done
+  if [[ -n "$dir" && -f "$dir/composer.json" ]]; then
+    cd "$dir" || fail "Cannot open $dir."
+  fi
+fi
+
 # 2. The connector, new enough to send a scan report.
 connector="$("${drush[@]}" php:eval '
   if (\Drupal::moduleHandler()->moduleExists("sentinel_connector") && class_exists("Drupal\\sentinel_connector\\PayloadBuilder")) {
@@ -119,6 +153,16 @@ if [[ -z "$connector" ]] || ! php -r 'exit(version_compare($argv[1], $argv[2], "
   log "The Sentinel Connector module must be enabled at version $MIN_CONNECTOR_VERSION or later (found: ${connector:-none})."
   report_problem connector_outdated || true
   exit 1
+fi
+
+# Problem reports go where the connector sends results, unless a URL was given.
+if [[ -z "$api_given" ]]; then
+  # shellcheck disable=SC2016 # PHP code.
+  resolved="$("${drush[@]}" php:eval 'echo \Drupal::service("Drupal\\sentinel_connector\\ApiBaseUrlResolver")->getUrl() ?? "";' 2> /dev/null | tr -d '[:space:]')" || resolved=''
+  resolved="${resolved%/}"
+  if [[ -n "$resolved" ]] && valid_url "$resolved"; then
+    api="$resolved"
+  fi
 fi
 
 # 3. Upgrade Status, added for this run only.
@@ -134,22 +178,29 @@ if [[ "$present" != 'yes' ]]; then
     report_problem install_failed || true
     exit 1
   fi
-  if ! composer require --dev --no-interaction --no-progress -W drupal/upgrade_status > "$work/composer.log" 2>&1; then
+  if ! composer require --dev --no-interaction --no-progress drupal/upgrade_status > "$work/composer.log" 2>&1; then
     core="$("${drush[@]}" status --field=drupal-version 2> /dev/null | tr -d '[:space:]')"
-    if [[ -z "$core" ]] || ! composer require --dev --no-interaction --no-progress -W drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1; then
+    if [[ -z "$core" ]] || ! composer require --dev --no-interaction --no-progress drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1; then
       tail -n 20 "$work/composer.log" >&2
-      log 'Composer could not add Upgrade Status.'
+      log "Composer could not add Upgrade Status without changing the site's locked versions."
       report_problem install_failed || true
       exit 1
     fi
   fi
 fi
+enabled_modules() {
+  "${drush[@]}" pm:list --type=module --status=enabled --field=name 2> /dev/null | tr -d ' ' | sort
+}
+enabled_modules > "$work/modules_before"
 if ! "${drush[@]}" pm:enable upgrade_status --yes > "$work/enable.log" 2>&1; then
   tail -n 20 "$work/enable.log" >&2
   log 'Upgrade Status could not be enabled.'
   report_problem install_failed || true
   exit 1
 fi
+
+# The modules this run turned on, to turn off again at the end.
+enabled_modules | comm -13 "$work/modules_before" - > "$work/added_modules"
 
 # 4. The scan. Exit code 3 means it found problems, which is a good scan.
 log 'Scanning. This can take several minutes.'

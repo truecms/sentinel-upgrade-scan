@@ -21,7 +21,8 @@ runs in the image you already build for your site.
 - The [Sentinel Connector](https://www.drupal.org/project/sentinel_connector)
   module, version **1.6.0 or later**, enabled on the site.
 - An image of your site with PHP, Composer, Drush, `bash` and `curl`.
-- A copy of your database the job can reach. Use a sanitised copy.
+- A copy of your database the job can reach. Use a sanitised copy that is
+  thrown away after the job.
 - The site's UUID and a scan key, from the site page in Sentinel. The key is
   shown once. Store it as a secret.
 
@@ -60,9 +61,13 @@ Inputs:
 |---|---|---|
 | `site-uuid` | yes | The site's UUID in Sentinel. |
 | `scan-key` | yes | The scan key, from a secret. |
-| `api-url` | no | Sentinel API base URL. Empty: the connector's setting, else production. |
-| `working-directory` | no | The Composer project root. Default: `.` |
+| `api-url` | no | Sentinel API base URL, `https://` (plain `http://` only for localhost). Empty: the connector's setting, else production. |
+| `working-directory` | no | Where to start. Default: `.` If Drush is not found there, the `drush` on the image's PATH is used, and the Composer root is found from Drupal. |
 | `drush` | no | The Drush command. Default: `vendor/bin/drush`, else `drush`. |
+
+If your image keeps the site somewhere else (for example `/app`), set
+`working-directory: /app`. The checkout step is only needed when your image
+does not already hold the site.
 
 GitHub turns off scheduled workflows in public repositories after 60 days with
 no activity. Sentinel marks the result out of date when that happens.
@@ -114,19 +119,22 @@ above.
 ## What it does
 
 1. `SENTINEL_UPGRADE_SCAN` is not set: it does nothing and exits 0.
-2. Drupal has no working database: it tells Sentinel `no_database` and exits 0.
+2. Drush does not run: it fails, because the job is set up wrong.
+   Drupal has no working database: it tells Sentinel `no_database` and exits 0.
 3. The connector is missing, disabled or older than 1.6.0: it tells Sentinel
    `connector_outdated` and fails.
 4. Upgrade Status is missing: it adds it with Composer for this run, then
-   enables it. If Composer cannot add it, it tells Sentinel `install_failed`
-   and fails.
+   enables it. It never changes the versions your lock file holds: if Upgrade
+   Status cannot be added without that, it tells Sentinel `install_failed` and
+   fails.
 5. It runs `drush upgrade_status:analyze --all`. Exit code 3 means the scan
    found problems, which is a good scan. Any other failure tells Sentinel
    `scan_failed` and fails.
 6. It runs `drush sentinel_connector:upgrade-status --scan-report`, which sends
    the counts. A custom project with no good scan from this run tells Sentinel
    `scan_failed`.
-7. It puts `composer.json` and `composer.lock` back as they were.
+7. It uninstalls the modules it turned on, and puts `composer.json` and
+   `composer.lock` back as they were.
 
 If the scan route is closed on Sentinel, it logs one line and exits 0.
 

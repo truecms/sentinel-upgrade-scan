@@ -1,0 +1,20 @@
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install bats
+        run: sudo apt-get update -q && sudo apt-get install -y -q bats shellcheck php-cli
+      - name: Shellcheck
+        run: shellcheck scan.sh scripts/pin-gitlab.sh tests/stubs/*
+      - name: Tests
+        run: bats tests/scan.bats

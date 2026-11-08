@@ -112,15 +112,17 @@ its inputs.
 | `SENTINEL_PROJECT_DIR` | Optional Composer project root. |
 | `SENTINEL_DRUSH` | Optional Drush command. |
 
-If your `settings.php` sets the connector's Site UUID or API URL, the
-connector uses those values for the result. Keep them the same as the values
-above.
+Without `SENTINEL_API_URL`, results and problems go to the API URL the
+connector is set to use. If that setting is not valid, the job fails and sends
+nothing. If your `settings.php` sets the connector's Site UUID, keep it the
+same as `SENTINEL_SITE_UUID`.
 
 ## What it does
 
 1. `SENTINEL_UPGRADE_SCAN` is not set: it does nothing and exits 0.
-2. Drush does not run: it fails, because the job is set up wrong.
-   Drupal has no working database: it tells Sentinel `no_database` and exits 0.
+2. Drush does not run, or cannot find the site: it fails, because the job is
+   set up wrong. Drupal has no working database: it tells Sentinel
+   `no_database` and exits 0.
 3. The connector is missing, disabled or older than 1.6.0: it tells Sentinel
    `connector_outdated` and fails.
 4. Upgrade Status is missing: it adds it with Composer for this run, then

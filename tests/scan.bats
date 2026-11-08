@@ -7,7 +7,7 @@ UUID='0f8fad5b-d9cb-469f-a165-70867728950e'
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   PROJECT="$BATS_TEST_TMPDIR/site"
-  mkdir -p "$PROJECT"
+  mkdir -p "$PROJECT/web"
   echo '{"original": true}' > "$PROJECT/composer.json"
   echo '{"original": true}' > "$PROJECT/composer.lock"
   export STUB_LOG="$BATS_TEST_TMPDIR/calls.log"
@@ -224,6 +224,43 @@ scan() { run bash "$ROOT/scan.sh"; }
   [ "$status" -eq 0 ]
   grep -q '"original": true' "$PROJECT/composer.json"
   [ ! -f "$BATS_TEST_TMPDIR/elsewhere/composer.json" ]
+}
+
+@test 'Drush that cannot find the site fails without reporting' {
+  STUB_ROOT='' scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'cannot find the Drupal site'* ]]
+  ! grep -q '^curl' "$STUB_LOG"
+}
+
+@test 'an invalid connector URL stops before anything is sent' {
+  unset SENTINEL_API_URL
+  STUB_CONNECTOR_URL='INVALID' scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'API URL is not valid'* ]]
+  ! grep -q '^curl' "$STUB_LOG"
+  ! grep -q 'analyze' "$STUB_LOG"
+}
+
+@test 'an outdated connector is reported to the connector URL' {
+  unset SENTINEL_API_URL
+  STUB_CONNECTOR_URL='https://uat-ingest.example' STUB_CONNECTOR='1.5.0' scan
+  [ "$status" -eq 1 ]
+  grep -q 'curl url https://uat-ingest.example/api/v1/' "$STUB_LOG"
+}
+
+@test 'without a given URL the connector keeps its own setting' {
+  unset SENTINEL_API_URL
+  STUB_CONNECTOR_URL='https://uat-ingest.example' scan
+  [ "$status" -eq 0 ]
+  grep -q 'report env key=set uuid=.* api=unset$' "$STUB_LOG"
+}
+
+@test 'a locked Upgrade Status is installed from the lock file' {
+  STUB_US_MISSING=1 STUB_LOCKED=1 scan
+  [ "$status" -eq 0 ]
+  grep -q '^composer install --no-interaction --no-progress$' "$STUB_LOG"
+  ! grep -q '^composer require' "$STUB_LOG"
 }
 
 @test 'gitlab/scan.yml pins the SHA-256 of scan.sh' {

@@ -123,23 +123,50 @@ report_problem() {
   return 1
 }
 
+trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+# Drush must find the site, or the job is set up wrong. This needs no
+# database.
+root="$("${drush[@]}" status --field=root 2> /dev/null | trim)" || root=''
+[[ -n "$root" && -d "$root" ]] || fail "Drush cannot find the Drupal site from here. Set working-directory (SENTINEL_PROJECT_DIR) to your site's project folder in the image."
+
+# Composer work happens in the project root, found from Drupal when the
+# current folder is not it.
+if [[ ! -f composer.json ]]; then
+  dir="$root"
+  while [[ "$dir" != / && ! -f "$dir/composer.json" ]]; do
+    dir="$(dirname "$dir")"
+  done
+  if [[ -f "$dir/composer.json" ]]; then
+    cd "$dir" || fail "Cannot open $dir."
+  fi
+fi
+
 # 1. A working Drupal with its database.
-bootstrap="$("${drush[@]}" status --field=bootstrap 2> /dev/null | tr -d '[:space:]')" || bootstrap=''
+bootstrap="$("${drush[@]}" status --field=bootstrap 2> /dev/null | trim)" || bootstrap=''
 if [[ "$bootstrap" != 'Successful' ]]; then
   log 'Drupal has no working database here, so there is nothing to scan.'
   report_problem no_database || true
   exit 0
 fi
 
-# Composer work happens in the project root, found from Drupal when the
-# current folder is not it.
-if [[ ! -f composer.json ]]; then
-  dir="$("${drush[@]}" status --field=root 2> /dev/null | tr -d '[:space:]')"
-  while [[ -n "$dir" && "$dir" != / && ! -f "$dir/composer.json" ]]; do
-    dir="$(dirname "$dir")"
-  done
-  if [[ -n "$dir" && -f "$dir/composer.json" ]]; then
-    cd "$dir" || fail "Cannot open $dir."
+# Problems go where the connector sends results, unless a URL was given. A
+# connector URL that is set but not valid stops here: the connector refuses
+# it too, and nothing goes to production by mistake.
+if [[ -z "$api_given" ]]; then
+  # shellcheck disable=SC2016 # PHP code, expanded by PHP.
+  resolved="$("${drush[@]}" php:eval '
+    $class = "Drupal\\sentinel_connector\\ApiBaseUrlResolver";
+    if (\Drupal::moduleHandler()->moduleExists("sentinel_connector") && class_exists($class)) {
+      $url = \Drupal::service($class)->getUrl();
+      echo $url ?? "INVALID";
+    }' 2> /dev/null | trim)" || resolved=''
+  resolved="${resolved%/}"
+  if [[ "$resolved" == INVALID ]] || { [[ -n "$resolved" ]] && ! valid_url "$resolved"; }; then
+    fail "The connector's Sentinel API URL is not valid. Fix it in settings.php or set api-url (SENTINEL_API_URL). Nothing was sent."
+  fi
+  if [[ -n "$resolved" ]]; then
+    api="$resolved"
   fi
 fi
 
@@ -147,7 +174,7 @@ fi
 connector="$("${drush[@]}" php:eval '
   if (\Drupal::moduleHandler()->moduleExists("sentinel_connector") && class_exists("Drupal\\sentinel_connector\\PayloadBuilder")) {
     echo \Drupal\sentinel_connector\PayloadBuilder::CONNECTOR_VERSION;
-  }' 2> /dev/null | tr -d '[:space:]')" || connector=''
+  }' 2> /dev/null | trim)" || connector=''
 # shellcheck disable=SC2016 # PHP code, expanded by PHP.
 if [[ -z "$connector" ]] || ! php -r 'exit(version_compare($argv[1], $argv[2], ">=") ? 0 : 1);' "$connector" "$MIN_CONNECTOR_VERSION"; then
   log "The Sentinel Connector module must be enabled at version $MIN_CONNECTOR_VERSION or later (found: ${connector:-none})."
@@ -155,18 +182,8 @@ if [[ -z "$connector" ]] || ! php -r 'exit(version_compare($argv[1], $argv[2], "
   exit 1
 fi
 
-# Problem reports go where the connector sends results, unless a URL was given.
-if [[ -z "$api_given" ]]; then
-  # shellcheck disable=SC2016 # PHP code.
-  resolved="$("${drush[@]}" php:eval 'echo \Drupal::service("Drupal\\sentinel_connector\\ApiBaseUrlResolver")->getUrl() ?? "";' 2> /dev/null | tr -d '[:space:]')" || resolved=''
-  resolved="${resolved%/}"
-  if [[ -n "$resolved" ]] && valid_url "$resolved"; then
-    api="$resolved"
-  fi
-fi
-
-# 3. Upgrade Status, added for this run only.
-present="$("${drush[@]}" php:eval 'echo \Drupal::service("extension.list.module")->exists("upgrade_status") ? "yes" : "no";' 2> /dev/null | tr -d '[:space:]')" || present=''
+# 3. Upgrade Status, added for this run only, never changing locked versions.
+present="$("${drush[@]}" php:eval 'echo \Drupal::service("extension.list.module")->exists("upgrade_status") ? "yes" : "no";' 2> /dev/null | trim)" || present=''
 if [[ "$present" != 'yes' ]]; then
   log 'Adding Upgrade Status for this run.'
   cp composer.json "$work/composer.json" || fail 'There is no composer.json here. Set SENTINEL_PROJECT_DIR.'
@@ -178,14 +195,22 @@ if [[ "$present" != 'yes' ]]; then
     report_problem install_failed || true
     exit 1
   fi
-  if ! composer require --dev --no-interaction --no-progress drupal/upgrade_status > "$work/composer.log" 2>&1; then
-    core="$("${drush[@]}" status --field=drupal-version 2> /dev/null | tr -d '[:space:]')"
-    if [[ -z "$core" ]] || ! composer require --dev --no-interaction --no-progress drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1; then
-      tail -n 20 "$work/composer.log" >&2
-      log "Composer could not add Upgrade Status without changing the site's locked versions."
-      report_problem install_failed || true
-      exit 1
-    fi
+  if composer show --locked drupal/upgrade_status > /dev/null 2>&1; then
+    # Already in the lock file, as a dev package left out of the image:
+    # install exactly what the lock file holds.
+    composer install --no-interaction --no-progress > "$work/composer.log" 2>&1
+  else
+    composer require --dev --no-interaction --no-progress drupal/upgrade_status > "$work/composer.log" 2>&1 || {
+      core="$("${drush[@]}" status --field=drupal-version 2> /dev/null | trim)"
+      [[ -n "$core" ]] && composer require --dev --no-interaction --no-progress drupal/upgrade_status "drupal/core-dev:$core" > "$work/composer.log" 2>&1
+    }
+  fi
+  # shellcheck disable=SC2181 # The status of whichever branch ran.
+  if [[ $? -ne 0 ]]; then
+    tail -n 20 "$work/composer.log" >&2
+    log "Composer could not add Upgrade Status without changing the site's locked versions."
+    report_problem install_failed || true
+    exit 1
   fi
 fi
 enabled_modules() {
@@ -215,7 +240,9 @@ fi
 
 # 5. Send the stored result. The connector reports scan_failed itself for an
 # incomplete scan, and exits 0 when the scan route is closed.
-SENTINEL_SCAN_KEY="$key" \
-SENTINEL_CONNECTOR_SITE_UUID="$uuid" \
-SENTINEL_CONNECTOR_API_BASE_URL="$api" \
-  "${drush[@]}" sentinel_connector:upgrade-status --scan-report --scan-started="$started"
+# Without a given URL the connector uses its own setting.
+report_env=(SENTINEL_SCAN_KEY="$key" SENTINEL_CONNECTOR_SITE_UUID="$uuid")
+if [[ -n "$api_given" ]]; then
+  report_env+=(SENTINEL_CONNECTOR_API_BASE_URL="$api")
+fi
+env "${report_env[@]}" "${drush[@]}" sentinel_connector:upgrade-status --scan-report --scan-started="$started"

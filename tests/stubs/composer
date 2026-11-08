@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 echo "composer $*" >> "$STUB_LOG"
+if [[ "$1" == show ]]; then [[ -n "${STUB_LOCKED:-}" ]]; exit; fi
 echo '{"changed": true}' > composer.json
 echo '{"changed": true}' > composer.lock
 if [[ -n "${STUB_COMPOSER_FAIL_ALL:-}" ]]; then exit 1; fi

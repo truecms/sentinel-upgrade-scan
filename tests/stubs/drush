@@ -7,7 +7,7 @@ case "$1" in
   status)
     case "$*" in
       *drupal-version*) echo "${STUB_CORE:-11.2.5}" ;;
-      *root*) echo "${STUB_ROOT:-$PWD/web}" ;;
+      *root*) echo "${STUB_ROOT-$PWD/web}" ;;
       *) echo "${STUB_BOOTSTRAP-Successful}" ;;
     esac ;;
   php:eval)
@@ -22,6 +22,6 @@ case "$1" in
     exit "${STUB_ENABLE_RC:-0}" ;;
   upgrade_status:analyze) echo 'analysis output'; exit "${STUB_ANALYZE_RC:-0}" ;;
   sentinel_connector:upgrade-status)
-    if [[ "${SENTINEL_SCAN_KEY:-}" == sk_scan_* ]]; then echo "report env key=set uuid=$SENTINEL_CONNECTOR_SITE_UUID api=$SENTINEL_CONNECTOR_API_BASE_URL" >> "$STUB_LOG"; fi
+    if [[ "${SENTINEL_SCAN_KEY:-}" == sk_scan_* ]]; then echo "report env key=set uuid=$SENTINEL_CONNECTOR_SITE_UUID api=${SENTINEL_CONNECTOR_API_BASE_URL-unset}" >> "$STUB_LOG"; fi
     exit "${STUB_REPORT_RC:-0}" ;;
 esac

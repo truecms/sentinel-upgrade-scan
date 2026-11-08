@@ -1,5 +1,11 @@
 # Sentinel upgrade scan
 
+> **This repository has moved.** The scan now lives in
+> [truecms/sentinel-actions](https://github.com/truecms/sentinel-actions),
+> folder `upgrade-scan`. Use `truecms/sentinel-actions/upgrade-scan` in GitHub
+> Actions and `upgrade-scan/gitlab.yml` from that repository in GitLab CI.
+> This repository is archived and gets no fixes.
+
 Runs the Drupal [Upgrade Status](https://www.drupal.org/project/upgrade_status)
 scan in your own CI pipeline and sends the result to
 [Sentinel](https://sentinelconnector.io). Upgrade Status never needs to be on
@@ -164,4 +170,4 @@ To release: run `scripts/pin-gitlab.sh vX.Y.Z`, commit, then tag `vX.Y.Z`.
 
 ## Licence
 
-GPL-2.0-or-later. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

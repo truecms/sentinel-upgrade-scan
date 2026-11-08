@@ -191,6 +191,14 @@ scan() { run bash "$ROOT/scan.sh"; }
   ! grep -q '^curl' "$STUB_LOG"
 }
 
+@test 'refuses an API URL with a query, fragment or credentials' {
+  for url in 'https://sentinel.example?foo=bar' 'https://sentinel.example#x' 'https://user:pass@sentinel.example'; do
+    SENTINEL_API_URL="$url" scan
+    [ "$status" -eq 1 ]
+  done
+  [ ! -s "$STUB_LOG" ]
+}
+
 @test 'refuses a remote http:// API URL' {
   SENTINEL_API_URL='http://sentinel.example' scan
   [ "$status" -eq 1 ]

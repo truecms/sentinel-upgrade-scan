@@ -44,7 +44,8 @@ uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 # Plain http:// only for localhost, as in the connector: the key must not
 # cross a network in the clear.
 valid_url() {
-  [[ "$1" =~ ^https://[^/[:space:]]+$ || "$1" =~ ^http://(localhost|[^/:[:space:]]+\.localhost)(:[0-9]+)?$ ]]
+  # Scheme, host and port only: no path, query, fragment or credentials.
+  [[ "$1" =~ ^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$ || "$1" =~ ^http://(localhost|[a-z0-9.-]+\.localhost)(:[0-9]{1,5})?$ ]]
 }
 api_given="${SENTINEL_API_URL:-${SENTINEL_CONNECTOR_API_BASE_URL:-}}"
 # Lower case, as the connector stores it, so the two can be compared.

@@ -195,9 +195,12 @@ scan() { run bash "$ROOT/scan.sh"; }
   grep -q 'curl url https://uat-ingest.example/api/v1/' "$STUB_LOG"
 }
 
-@test 'a given URL wins over the connector URL' {
-  STUB_CONNECTOR_URL='https://uat-ingest.example' STUB_ANALYZE_RC=1 scan
-  grep -q 'curl url https://sentinel.example/api/v1/' "$STUB_LOG"
+@test 'a given URL that settings.php overrides stops before anything is sent' {
+  STUB_CONNECTOR_URL='https://uat-ingest.example' scan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'not to https://sentinel.example'* ]]
+  ! grep -q '^curl' "$STUB_LOG"
+  ! grep -q 'analyze' "$STUB_LOG"
 }
 
 @test 'uninstalls the modules this run enabled' {

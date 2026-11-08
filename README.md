@@ -114,7 +114,10 @@ its inputs.
 
 Without `SENTINEL_API_URL`, results and problems go to the API URL the
 connector is set to use. If that setting is not valid, the job fails and sends
-nothing. If your `settings.php` sets the connector's Site UUID, keep it the
+nothing. With `SENTINEL_API_URL`, the connector must send to the same URL, or
+the job fails. With no database the connector cannot be asked, so a missing
+database is reported to `SENTINEL_API_URL`, else production: set it if your
+site uses another Sentinel. If your `settings.php` sets the connector's Site UUID, keep it the
 same as `SENTINEL_SITE_UUID`.
 
 ## What it does

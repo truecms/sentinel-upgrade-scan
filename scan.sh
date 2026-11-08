@@ -150,24 +150,30 @@ if [[ "$bootstrap" != 'Successful' ]]; then
   exit 0
 fi
 
-# Problems go where the connector sends results, unless a URL was given. A
-# connector URL that is set but not valid stops here: the connector refuses
-# it too, and nothing goes to production by mistake.
-if [[ -z "$api_given" ]]; then
-  # shellcheck disable=SC2016 # PHP code, expanded by PHP.
-  resolved="$("${drush[@]}" php:eval '
-    $class = "Drupal\\sentinel_connector\\ApiBaseUrlResolver";
-    if (\Drupal::moduleHandler()->moduleExists("sentinel_connector") && class_exists($class)) {
-      $url = \Drupal::service($class)->getUrl();
-      echo $url ?? "INVALID";
-    }' 2> /dev/null | trim)" || resolved=''
-  resolved="${resolved%/}"
-  if [[ "$resolved" == INVALID ]] || { [[ -n "$resolved" ]] && ! valid_url "$resolved"; }; then
-    fail "The connector's Sentinel API URL is not valid. Fix it in settings.php or set api-url (SENTINEL_API_URL). Nothing was sent."
+# Results and problems must go to the same Sentinel. Ask the connector where
+# it sends: with a given URL it must agree (settings.php wins over the
+# environment in the connector); without one, problems follow it. A connector
+# URL that is not valid stops here, so nothing goes to production by mistake.
+url_env=()
+if [[ -n "$api_given" ]]; then
+  url_env=(SENTINEL_CONNECTOR_API_BASE_URL="$api")
+fi
+# shellcheck disable=SC2016 # PHP code, expanded by PHP.
+resolved="$(env ${url_env[@]+"${url_env[@]}"} "${drush[@]}" php:eval '
+  $class = "Drupal\\sentinel_connector\\ApiBaseUrlResolver";
+  if (\Drupal::moduleHandler()->moduleExists("sentinel_connector") && class_exists($class)) {
+    $url = \Drupal::service($class)->getUrl();
+    echo $url ?? "INVALID";
+  }' 2> /dev/null | trim)" || resolved=''
+resolved="${resolved%/}"
+if [[ "$resolved" == INVALID ]] || { [[ -n "$resolved" ]] && ! valid_url "$resolved"; }; then
+  fail "The connector's Sentinel API URL is not valid. Fix it in settings.php or set api-url (SENTINEL_API_URL). Nothing was sent."
+fi
+if [[ -n "$resolved" ]]; then
+  if [[ -n "$api_given" && "$resolved" != "$api" ]]; then
+    fail "The connector sends to $resolved (set in settings.php), not to $api. Remove api-url (SENTINEL_API_URL) or change the setting. Nothing was sent."
   fi
-  if [[ -n "$resolved" ]]; then
-    api="$resolved"
-  fi
+  api="$resolved"
 fi
 
 # 2. The connector, new enough to send a scan report.

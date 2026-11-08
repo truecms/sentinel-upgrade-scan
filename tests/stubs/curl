@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Stand-in for curl: records the request, prints STUB_HTTP as the status.
+args=("$@"); url="${args[-1]}"
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    -H) h="${args[i+1]}"; if [[ "$h" == @* ]]; then echo "curl header-file $(cat "${h#@}")" >> "$STUB_LOG"; fi ;;
+    --data-binary) echo "curl body $(cat "${args[i+1]#@}")" >> "$STUB_LOG" ;;
+  esac
+done
+echo "curl url $url" >> "$STUB_LOG"
+printf '%s' "${STUB_HTTP:-200}"

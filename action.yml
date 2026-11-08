@@ -1,0 +1,39 @@
+name: Sentinel upgrade scan
+description: Run the Drupal Upgrade Status scan in your own site image and send the counts to Sentinel.
+author: TrueCMS
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  site-uuid:
+    description: The site's UUID in Sentinel, from the site page.
+    required: true
+  scan-key:
+    description: The site's scan key. Pass it from a secret, never as plain text.
+    required: true
+  api-url:
+    description: Sentinel API base URL. Leave empty to use the connector's setting or production.
+    required: false
+    default: ''
+  working-directory:
+    description: The Composer project root of the site.
+    required: false
+    default: '.'
+  drush:
+    description: The Drush command. Leave empty for vendor/bin/drush.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Scan and report
+      shell: bash
+      env:
+        SENTINEL_SITE_UUID: ${{ inputs.site-uuid }}
+        SENTINEL_SCAN_KEY: ${{ inputs.scan-key }}
+        SENTINEL_API_URL: ${{ inputs.api-url }}
+        SENTINEL_PROJECT_DIR: ${{ inputs.working-directory }}
+        SENTINEL_DRUSH: ${{ inputs.drush }}
+      run: bash "$GITHUB_ACTION_PATH/scan.sh"

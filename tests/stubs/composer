@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+echo "composer $*" >> "$STUB_LOG"
+echo "composer no-dev=${COMPOSER_NO_DEV-unset}" >> "$STUB_LOG"
+if [[ "$1" == show ]]; then [[ -n "${STUB_LOCKED:-}" ]]; exit; fi
+echo '{"changed": true}' > composer.json
+if [[ -n "${STUB_LOCK_AFTER:-}" ]]; then cp "$STUB_LOCK_AFTER" composer.lock; else echo '{"changed": true}' > composer.lock; fi
+if [[ -n "${STUB_COMPOSER_FAIL_ALL:-}" ]]; then exit 1; fi
+if [[ -n "${STUB_COMPOSER_FAIL_FIRST:-}" && "$1" == require && "$*" != *core-dev* ]]; then exit 1; fi
+exit 0

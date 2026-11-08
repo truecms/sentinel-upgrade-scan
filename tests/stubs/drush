@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Stand-in for Drush. Behaviour comes from STUB_* variables.
+echo "drush $*" >> "$STUB_LOG"
+state="$STUB_LOG.enabled"
+case "$1" in
+  version) exit "${STUB_DRUSH_BROKEN:-0}" ;;
+  status)
+    case "$*" in
+      *drupal-version*) echo "${STUB_CORE:-11.2.5}" ;;
+      *root*) echo "${STUB_ROOT-$PWD/web}" ;;
+      *db-status*) echo "${STUB_DB-}" ;;
+      *) echo "${STUB_BOOTSTRAP-Successful}" ;;
+    esac ;;
+  php:eval)
+    if [[ "$2" == *CONNECTOR_VERSION* ]]; then echo "${STUB_CONNECTOR-1.6.0}";
+    elif [[ "$2" == *ApiBaseUrlResolver* ]]; then [[ -n "${STUB_RESOLVE_FAIL:-}" ]] && exit 1; echo "${STUB_CONNECTOR_URL-${SENTINEL_CONNECTOR_API_BASE_URL-}}";
+    elif [[ -n "${STUB_US_MISSING:-}" ]]; then echo no; else echo yes; fi ;;
+  pm:list)
+    printf 'node\nsentinel_connector\n'
+    if [[ -n "${STUB_US_ENABLED:-}" || -f "$state" ]]; then printf 'upgrade_status\n'; fi ;;
+  pm:enable)
+    [[ "${STUB_ENABLE_RC:-0}" -eq 0 ]] && touch "$state"
+    exit "${STUB_ENABLE_RC:-0}" ;;
+  upgrade_status:analyze) echo 'analysis output'; exit "${STUB_ANALYZE_RC:-0}" ;;
+  sentinel_connector:upgrade-status)
+    if [[ "${SENTINEL_SCAN_KEY:-}" == sk_scan_* ]]; then echo "report env key=set uuid=$SENTINEL_CONNECTOR_SITE_UUID api=${SENTINEL_CONNECTOR_API_BASE_URL-unset}" >> "$STUB_LOG"; fi
+    exit "${STUB_REPORT_RC:-0}" ;;
+esac

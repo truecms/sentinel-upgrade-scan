@@ -1,0 +1,21 @@
+# Sentinel upgrade scan for GitLab CI.
+#
+# Include this file at a release tag and override the job with your own site
+# image, database service and SENTINEL_* variables. See the README.
+#
+# The job downloads scan.sh from the same release and checks its SHA-256
+# before running it. scripts/pin-gitlab.sh writes both values below.
+
+sentinel-upgrade-scan:
+  variables:
+    SENTINEL_UPGRADE_SCAN_REF: v1.0.0
+    SENTINEL_UPGRADE_SCAN_SHA256: fbd3d1fa4159eb06738348274b3a4faa73c22530f633fb832c153303e9c9ca99
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  script:
+    - |
+      curl -fsSL --proto '=https' -o /tmp/sentinel-upgrade-scan.sh \
+        "https://raw.githubusercontent.com/truecms/sentinel-upgrade-scan/${SENTINEL_UPGRADE_SCAN_REF}/scan.sh"
+      echo "${SENTINEL_UPGRADE_SCAN_SHA256}  /tmp/sentinel-upgrade-scan.sh" | sha256sum -c -
+      bash /tmp/sentinel-upgrade-scan.sh
